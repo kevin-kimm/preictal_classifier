@@ -1,2 +1,2 @@
 # preictal_classifier
-Early seizure detection
+Early Seizure Detection
