@@ -208,3 +208,6 @@ __marimo__/
 
 # Mac stuff:
 .DS_Store
+
+# Windows stuff:
+Thumbs.db
