@@ -215,3 +215,6 @@ Thumbs.db
 # Dataset
 data/
 *.edf
+
+# Generated outputs
+*.png
