@@ -33,8 +33,8 @@ DATA_ROOT   = Path("data/siena-scalp-eeg-database-1.0.0")
 OUTPUT_DIR  = Path("data/processed")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 6 channel bilateral temporal montage
-TARGET_CHANNELS = ["F7", "T3", "T5", "F8", "T4", "T6"]
+# 8 channel bilateral temporal montage
+TARGET_CHANNELS = ["F7", "T3", "T5", "C3", "F8", "T4", "T6", "C4"]
 
 TARGET_SFREQ  = 250      # Hz matches Cyton board
 WINDOW_SEC    = 30       # seconds per window
@@ -299,7 +299,7 @@ for pdir in patient_dirs:
         print(f"Could not probe channels: {e} — skipping\n")
         continue
 
-    print(f"  Channels  : {len(channel_map)}/6 mapped → {list(channel_map.keys())}")
+    print(f"  Channels  : {len(channel_map)}/8 mapped → {list(channel_map.keys())}")
 
     # Process each EDF
     patient_X, patient_y = [], []
