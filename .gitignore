@@ -219,3 +219,4 @@ data/
 # Generated outputs
 *.png
 models/
+data/features/
