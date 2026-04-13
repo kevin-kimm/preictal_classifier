@@ -53,3 +53,4 @@ typing_extensions==4.15.0
 urllib3==2.6.3
 wheel==0.46.3
 wrapt==2.1.2
+xgboost==3.2.0
