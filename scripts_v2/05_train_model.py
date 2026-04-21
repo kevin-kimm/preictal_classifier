@@ -41,7 +41,7 @@ tf.random.set_seed(42)
 np.random.seed(42)
 
 # Config
-FEATURES_PATH = Path("data/features/features.npz")
+FEATURES_PATH = Path("data/features/features_correlation.npz")
 MODELS_DIR    = Path("models")
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
