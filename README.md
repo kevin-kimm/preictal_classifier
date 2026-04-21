@@ -23,34 +23,6 @@ This project trains and evaluates a seizure prediction model that aims to alert 
 
 > The dataset is not included in this repository. Download it from PhysioNet and place it in `data/siena-scalp-eeg-database-1.0.0/`.
 
-## Project Structure
-
-```
-preictal_classifier/
-├── scripts_v1/                  ← 7-channel headband friendly montage
-│   ├── 02_visualize_dataset.py
-│   ├── 03_preprocess.py
-│   ├── 03_timeline_chart.py
-│   ├── 04_extract_features.py
-│   ├── 05_train_model.py
-│   └── 06_visualize_eeg_phases.py
-├── scripts_v2/                  ← 8-channel best ML performance montage
-│   ├── 02_visualize_dataset.py
-│   ├── 03_preprocess.py
-│   ├── 03_timeline_chart.py
-│   ├── 04_extract_features.py
-│   ├── 05_train_model.py
-│   ├── 06_add_coherence.py
-│   └── 06_visualize_eeg_phases.py
-├── data/                        ← gitignored
-│   ├── siena-scalp-eeg-database-1.0.0/
-│   ├── processed/
-│   └── features/
-├── models/                      ← gitignored
-├── plots/                       ← gitignored
-├── requirements.txt
-└── README.md
-```
 
 ## Channel Montages
 
@@ -58,23 +30,47 @@ preictal_classifier/
 ```
 T3, T5, O1, Pz, O2, T6, T4
 ```
-Optimized for a headband that wraps around the back of the head. All electrodes are accessible without frontal placement.
+Optimized for a headband that wraps around the back of the head. All electrodes are accessible without frontal placement. Mean NN AUC: **0.563**
 
 ### scripts_v2 — Best ML Performance (8 channels)
 ```
 F7, T3, T5, C3, F8, T4, T6, C4
 ```
-Bilateral temporal + frontal-temporal + central montage. Achieves best cross-patient generalization in LOPO evaluation.
+Bilateral temporal + frontal-temporal + central montage. Achieves best cross-patient generalization in LOPO evaluation. Mean NN AUC: **0.584**
 
 ## Pipeline
 
 Each scripts folder runs in this order:
 
 ```
-03_preprocess.py          ← Load EDF → filter → resample → window → label
-04_extract_features.py    ← Extract 64 band power features per window
-05_train_model.py         ← LOPO training: GradientBoosting + Neural Network
+03_preprocess.py           ← Load EDF → filter → resample → window → label
+04_extract_features.py     ← Extract band power features (64)
+07_add_correlation.py      ← Extract band powers + correlation (148) [v2 only]
+05_train_model.py          ← LOPO training: GradientBoosting + Neural Network
 06_visualize_eeg_phases.py ← Visualize EEG across seizure phases
+```
+
+## Setup
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/kevin-kimm/preictal_classifier.git
+cd preictal_classifier
+
+# 2. Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Download the Siena dataset from PhysioNet
+# Place in: data/siena-scalp-eeg-database-1.0.0/
+
+# 5. Run the pipeline (example using scripts_v2)
+python3 scripts_v2/03_preprocess.py
+python3 scripts_v2/04_extract_features.py
+python3 scripts_v2/05_train_model.py
 ```
 
 ## Preprocessing Details
@@ -89,34 +85,49 @@ Each scripts folder runs in this order:
 | Buffer zone | 5–30 min before seizure (discarded) |
 | Interictal label | >30 min from any seizure |
 
-## Feature Extraction
+## Feature Sets
 
-64 features per window, normalized relative to each patient's own interictal baseline:
-
+### Band Powers (64 features) — `04_extract_features.py`
+Normalized relative to each patient's own interictal baseline:
 - **Band powers** (40): log power in delta, theta, alpha, beta, gamma × 8 channels
 - **Band ratios** (16): theta/alpha and delta/beta × 8 channels
 - **Spectral entropy** (8): 1 per channel
 
-Patient-relative normalization is critical — features are z-scored against each patient's own interictal mean/std so the model learns deviations from *that person's* normal brain state.
+### Band Powers + Correlation (148 features) — `07_add_correlation.py`
+Adds time-domain synchronization features on top of band powers:
+- **Pearson correlation** (28): linear synchrony between every channel pair
+- **Cross-correlation** (56): peak synchrony value + propagation lag per pair (±500ms)
+
+Patient-relative normalization is applied to all feature sets — features are
+z-scored against each patient's own interictal mean/std so the model learns
+deviations from that person's normal brain state, not absolute values.
 
 ## Model & Evaluation
 
 - **Architecture**: Dense neural network (128→64→32→1) + GradientBoosting baseline
-- **Validation**: Leave-One-Patient-Out (LOPO) — train on 13 patients, test on 14th
+- **Validation**: Leave One Patient Out (LOPO) — train on 13 patients, test on 14th
 - **Class imbalance**: Handled via sample weights (33.7:1 ratio)
 - **Decision threshold**: 0.65 (tuned for high precision)
 - **Metrics**: AUC-ROC, F1, Precision, Recall (never accuracy)
 
-## Results (scripts_v2, best run)
+## Results Summary
 
+### Band Powers only (64 features)
 | Model | Mean AUC | Mean F1 | Mean Precision | Mean Recall |
 |---|---|---|---|---|
-| Neural Network | 0.584 | 0.087 | 0.082 | 0.205 |
+| Neural Network | **0.584** | 0.087 | 0.082 | 0.205 |
 | GradientBoosting | 0.514 | 0.006 | 0.024 | 0.004 |
 
-Best individual patient: PN07 — Neural Network AUC **0.884**
+### Band Powers + Correlation (148 features)
+| Model | Mean AUC | Mean F1 | Mean Precision | Mean Recall |
+|---|---|---|---|---|
+| Neural Network | 0.491 | 0.060 | 0.061 | 0.089 |
+| GradientBoosting | **0.550** | 0.004 | 0.052 | 0.002 |
 
-> Note: Results vary between runs due to neural network random initialization. AUC ~0.58 is the consistent baseline.
+**Key finding**: Each model has a different optimal feature set.
+- Neural Network performs best with band powers only (64 features)
+- GradientBoosting performs best with correlation features added (148 features)
+- Best individual result: PN07 Neural Network AUC **0.884** (band powers)
 
 ## Class Imbalance
 
@@ -127,14 +138,23 @@ Imbalance ratio      :   ~169:1 (raw)
 After windowing      :    33.7:1
 ```
 
-Never use accuracy as a metric — a model predicting "no seizure" always would achieve 97%+ accuracy.
+Never use accuracy as a metric — a model predicting "no seizure" always
+would achieve 97%+ accuracy. Always evaluate with AUC, F1, Precision, Recall.
 
 ## Known Limitations
 
-- 14 patients is a small dataset for cross patient generalization
+- 14 patients is a small dataset for cross-patient generalization
 - PN01 and PN11 have no preictal windows (seizures occur too early in recordings)
-- Some patients show AUC below 0.5 (worse than random) — their preictal signatures don't match other patients
-- GradientBoosting consistently underperforms the neural network on this task
+- Some patients show AUC below 0.5 — their preictal signatures differ from others
+- Neural network results vary between runs due to random initialization (~±0.06 AUC)
+- Adding more features (coherence, correlation) helps GradientBoosting but hurts the neural network due to overfitting on limited data
+
+## Next Steps
+
+- Ensemble model combining GradientBoosting (148 features) + Neural Network (64 features)
+- Post-processing smoothing — require 3 consecutive positive windows before alerting
+- Per-patient threshold tuning instead of fixed 0.65
+- Real-time inference pipeline for OpenBCI Cyton board
 
 ## Citation
 
