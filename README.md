@@ -1,10 +1,10 @@
 # Preictal Classifier — Seizure Prediction Algorithm
 
-A machine learning pipeline for predicting epileptic seizures using EEG data, designed for deployment on a wearable headband device powered by the OpenBCI Cyton board.
+A machine learning pipeline for predicting epileptic seizures using EEG data, designed for a wearable headband device powered by the OpenBCI Cyton board.
 
 ## Overview
 
-This project trains and evaluates a seizure prediction model that aims to alert patients **5 minutes before a seizure occurs**. The algorithm analyzes EEG frequency band features from 8 temporal/occipital electrodes to classify brain activity as either **preictal** (pre-seizure) or **interictal** (normal).
+This project trains and evaluates a seizure prediction model that aims to alert patients **5 minutes before a seizure occurs**. The algorithm analyzes EEG frequency band features from 8 temporal/occipital electrodes to classify brain activity as either **preictal** (pre seizure) or **interictal** (normal).
 
 ## Hardware Target
 
@@ -23,7 +23,6 @@ This project trains and evaluates a seizure prediction model that aims to alert 
 
 > The dataset is not included in this repository. Download it from PhysioNet and place it in `data/siena-scalp-eeg-database-1.0.0/`.
 
-
 ## Channel Montages
 
 ### scripts_v1 — Headband-Friendly (7 channels)
@@ -36,41 +35,18 @@ Optimized for a headband that wraps around the back of the head. All electrodes 
 ```
 F7, T3, T5, C3, F8, T4, T6, C4
 ```
-Bilateral temporal + frontal-temporal + central montage. Achieves best cross-patient generalization in LOPO evaluation. Mean NN AUC: **0.584**
+Bilateral temporal + frontal temporal + central montage. Achieves best cross patient generalization in LOPO evaluation. Mean NN AUC: **0.584**
 
 ## Pipeline
 
-Each scripts folder runs in this order:
-
 ```
 03_preprocess.py           ← Load EDF → filter → resample → window → label
-04_extract_features.py     ← Extract band power features (64)
-07_add_correlation.py      ← Extract band powers + correlation (148) [v2 only]
+04_extract_features.py     ← Extract band power features (64 features)
+07_add_correlation.py      ← Extract band powers + correlation (148 features)
 05_train_model.py          ← LOPO training: GradientBoosting + Neural Network
+06_add_coherence.py        ← Experimental: coherence features (204 features)
+08_ensemble.py             ← Ensemble: NN + GradBoost with post-processing
 06_visualize_eeg_phases.py ← Visualize EEG across seizure phases
-```
-
-## Setup
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/kevin-kimm/preictal_classifier.git
-cd preictal_classifier
-
-# 2. Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Download the Siena dataset from PhysioNet
-# Place in: data/siena-scalp-eeg-database-1.0.0/
-
-# 5. Run the pipeline (example using scripts_v2)
-python3 scripts_v2/03_preprocess.py
-python3 scripts_v2/04_extract_features.py
-python3 scripts_v2/05_train_model.py
 ```
 
 ## Preprocessing Details
@@ -85,49 +61,85 @@ python3 scripts_v2/05_train_model.py
 | Buffer zone | 5–30 min before seizure (discarded) |
 | Interictal label | >30 min from any seizure |
 
-## Feature Sets
+## Feature Sets Investigated
 
-### Band Powers (64 features) — `04_extract_features.py`
-Normalized relative to each patient's own interictal baseline:
+### 1. Band Powers (64 features) — `04_extract_features.py`
 - **Band powers** (40): log power in delta, theta, alpha, beta, gamma × 8 channels
 - **Band ratios** (16): theta/alpha and delta/beta × 8 channels
 - **Spectral entropy** (8): 1 per channel
 
-### Band Powers + Correlation (148 features) — `07_add_correlation.py`
-Adds time-domain synchronization features on top of band powers:
+### 2. Band Powers + Correlation (148 features) — `07_add_correlation.py`
+Adds time domain synchronization features:
 - **Pearson correlation** (28): linear synchrony between every channel pair
 - **Cross-correlation** (56): peak synchrony value + propagation lag per pair (±500ms)
 
-Patient-relative normalization is applied to all feature sets — features are
-z-scored against each patient's own interictal mean/std so the model learns
-deviations from that person's normal brain state, not absolute values.
+### 3. Band Powers + Coherence (204 features) — `06_add_coherence.py`
+Adds frequency domain synchronization features:
+- **Coherence** (140): magnitude squared coherence per channel pair per band
+
+All features are z scored relative to each patient's own interictal baseline, the model learns deviations from that person's normal brain state, not absolute values.
 
 ## Model & Evaluation
 
 - **Architecture**: Dense neural network (128→64→32→1) + GradientBoosting baseline
 - **Validation**: Leave One Patient Out (LOPO) — train on 13 patients, test on 14th
-- **Class imbalance**: Handled via sample weights (33.7:1 ratio)
+- **Class imbalance**: 33.7:1 — handled via sample weights
 - **Decision threshold**: 0.65 (tuned for high precision)
-- **Metrics**: AUC-ROC, F1, Precision, Recall (never accuracy)
+- **Metrics**: AUC-ROC, F1, Precision, Recall, not accuracy
 
-## Results Summary
+## Results — Full Comparison
 
-### Band Powers only (64 features)
-| Model | Mean AUC | Mean F1 | Mean Precision | Mean Recall |
+### Per-patient Neural Network AUC (band powers, best run)
+
+| Patient | AUC | Notes |
+|---|---|---|
+| PN00 | 0.365 | Below random — atypical preictal pattern |
+| PN03 | 0.760 | Good signal |
+| PN05 | 0.450 | Near random |
+| PN06 | 0.584 | Moderate |
+| PN07 | **0.884** | Best patient — very consistent preictal pattern |
+| PN09 | 0.587 | Moderate |
+| PN10 | 0.469 | Below average |
+| PN11 | — | No preictal windows |
+| PN12 | 0.691 | Good signal |
+| PN13 | 0.606 | Moderate |
+| PN14 | 0.564 | Moderate |
+| PN16 | 0.547 | Moderate |
+| PN17 | 0.497 | Near random |
+| **MEAN** | **0.584** | |
+
+### Feature Set Comparison
+
+| Feature Set | Features | NN AUC | GB AUC | Winner |
 |---|---|---|---|---|
-| Neural Network | **0.584** | 0.087 | 0.082 | 0.205 |
-| GradientBoosting | 0.514 | 0.006 | 0.024 | 0.004 |
+| Band powers | 64 | **0.584** | 0.514 | NN |
+| + Coherence | 204 | 0.479 | 0.499 | GB |
+| + Correlation | 148 | 0.491 | **0.550** | GB |
 
-### Band Powers + Correlation (148 features)
-| Model | Mean AUC | Mean F1 | Mean Precision | Mean Recall |
-|---|---|---|---|---|
-| Neural Network | 0.491 | 0.060 | 0.061 | 0.089 |
-| GradientBoosting | **0.550** | 0.004 | 0.052 | 0.002 |
+### Ensemble Comparison (08_ensemble.py)
 
-**Key finding**: Each model has a different optimal feature set.
-- Neural Network performs best with band powers only (64 features)
-- GradientBoosting performs best with correlation features added (148 features)
-- Best individual result: PN07 Neural Network AUC **0.884** (band powers)
+| Method | Mean AUC | Notes |
+|---|---|---|
+| Neural Network alone | 0.541 | Band powers |
+| GradientBoosting alone | 0.550 | Correlation features |
+| Average ensemble | 0.549 | Mean of both probabilities |
+| Weighted ensemble | 0.555 | Weighted by validation AUC |
+| Max ensemble | 0.541 | Highest probability wins |
+| **Consensus ensemble** | **0.575** | Both models must agree |
+| Average + smoothing | 0.500 | Too strict for small test sets |
+
+## Recommended Model
+
+> **Neural Network on band powers (64 features) — Mean AUC 0.584**
+
+This is the best performing configuration across all experiments. Key reasons:
+
+- Band powers are biologically meaningful and generalizable across patients
+- The neural network learns non linear relationships between bands that GradientBoosting misses
+- Adding more features (coherence, correlation) consistently hurts the NN due to overfitting on 14 patients
+- The consensus ensemble (0.575) is the best ensemble strategy but does not beat the simple NN
+
+For deployment on the Cyton board, use the Neural Network with band power features. The model is lightweight (179K parameters) and can run inference in real time.
 
 ## Class Imbalance
 
@@ -138,23 +150,22 @@ Imbalance ratio      :   ~169:1 (raw)
 After windowing      :    33.7:1
 ```
 
-Never use accuracy as a metric — a model predicting "no seizure" always
-would achieve 97%+ accuracy. Always evaluate with AUC, F1, Precision, Recall.
-
 ## Known Limitations
 
-- 14 patients is a small dataset for cross-patient generalization
+- 14 patients is a small dataset for cross patient generalization
 - PN01 and PN11 have no preictal windows (seizures occur too early in recordings)
-- Some patients show AUC below 0.5 — their preictal signatures differ from others
-- Neural network results vary between runs due to random initialization (~±0.06 AUC)
-- Adding more features (coherence, correlation) helps GradientBoosting but hurts the neural network due to overfitting on limited data
+- Some patients show AUC below 0.5, their preictal signatures differ from others in the dataset
+- Neural network results vary ±0.06 AUC between runs due to random initialization
+- Adding more features hurts the neural network (overfitting) but helps GradientBoosting
+- Post processing smoothing is too strict for small per patient test sets
 
 ## Next Steps
 
-- Ensemble model combining GradientBoosting (148 features) + Neural Network (64 features)
-- Post-processing smoothing — require 3 consecutive positive windows before alerting
-- Per-patient threshold tuning instead of fixed 0.65
-- Real-time inference pipeline for OpenBCI Cyton board
+- Patient specific fine tuning when device is worn by a new user
+- Longer preictal window (10–15 min) may improve detectability
+- Larger dataset (100+ patients) to enable raw waveform CNN+LSTM approach
+- Real time inference pipeline for OpenBCI Cyton board
+- Hardware validation with physical headband prototype
 
 ## Citation
 
