@@ -39,7 +39,7 @@ DATA_ROOT  = Path("data/siena-scalp-eeg-database-1.0.0")
 OUTPUT_DIR = Path("data/processed_v3")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-TARGET_CHANNELS = ["F7", "T3", "T5", "C3", "F8", "T4", "T6", "C4"]
+TARGET_CHANNELS = ["T3", "T5", "O1", "Pz", "O2", "T6", "T4"]   # headband-friendly, no frontal
 
 TARGET_SFREQ       = 250
 WINDOW_SEC         = 30

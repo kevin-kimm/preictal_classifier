@@ -35,7 +35,7 @@ FEATURES_DIR  = Path("data/features")
 FEATURES_DIR.mkdir(parents=True, exist_ok=True)
 
 SFREQ      = 250
-N_CHANNELS = 8
+N_CHANNELS = 7   # headband-friendly montage: T3, T5, O1, Pz, O2, T6, T4
 BANDS = {
     "delta": (0.5,  4.0),
     "theta": (4.0,  8.0),
