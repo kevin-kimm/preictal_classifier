@@ -39,7 +39,7 @@ DATA_ROOT  = Path("data/siena-scalp-eeg-database-1.0.0")
 OUTPUT_DIR = Path("data/processed_v3")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-TARGET_CHANNELS = ["T3", "T5", "O1", "Pz", "O2", "T6", "T4"]   # headband-friendly, no frontal
+TARGET_CHANNELS = ["T3", "T5", "O1", "Pz", "O2", "T6", "T4"]   # headbandf riendly, no frontal
 
 TARGET_SFREQ       = 250
 WINDOW_SEC         = 30
@@ -56,7 +56,7 @@ WINDOW_SAMPLES = int(TARGET_SFREQ * WINDOW_SEC)   # 7500
 STEP_SAMPLES   = int(TARGET_SFREQ * STEP_SEC)     # 1250
 
 
-# ── Seizure file parser ───────────────────────────────────────────────────────
+# Seizure file parser
 
 def extract_first_timestamp(line: str):
     line = re.sub(r"(\d)\s(\d)", r"\1\2", line)
@@ -130,7 +130,7 @@ def parse_seizure_file(txt_path: Path) -> list:
     return seizures
 
 
-# ── Channel selection ─────────────────────────────────────────────────────────
+# Channel selection 
 
 def find_channels(raw_ch_names: list, targets: list) -> dict:
     mapping = {}
@@ -144,7 +144,7 @@ def find_channels(raw_ch_names: list, targets: list) -> dict:
     return mapping
 
 
-# ── Window labeling ───────────────────────────────────────────────────────────
+# Window labeling
 
 def label_window(window_end_sec: float, seizures_in_file: list) -> int:
     """
@@ -184,7 +184,7 @@ def label_window(window_end_sec: float, seizures_in_file: list) -> int:
     return 0
 
 
-# ── Process one EDF file ──────────────────────────────────────────────────────
+# Process one EDF file 
 
 def process_edf(edf_path: Path,
                 seizures_in_file: list,
@@ -229,7 +229,7 @@ def process_edf(edf_path: Path,
             window = data[:, start:end].copy()
 
             # Phase 1.3 — Amplitude artifact rejection
-            if window.ptp(axis=1).max() > ARTIFACT_THRESHOLD:
+            if (window.max(axis=1) - window.min(axis=1)).max() > ARTIFACT_THRESHOLD:
                 n_artifact += 1
                 start += STEP_SAMPLES
                 continue
@@ -255,7 +255,7 @@ def process_edf(edf_path: Path,
             np.array(y_list,  dtype=np.int8))
 
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
+# Main 
 
 print("\n" + "=" * 62)
 print("  PREPROCESSING PIPELINE v3")
