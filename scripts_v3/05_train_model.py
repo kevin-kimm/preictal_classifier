@@ -49,9 +49,7 @@ BATCH_SIZE = 64
 EPOCHS     = 50
 
 
-# ─────────────────────────────────────────────────────────────
-# METRICS
-# ─────────────────────────────────────────────────────────────
+# Metrics
 def evaluate(y_true, y_prob, threshold=THRESHOLD) -> dict:
     y_pred = (y_prob >= threshold).astype(int)
     cm     = confusion_matrix(y_true, y_pred)
@@ -68,9 +66,8 @@ def evaluate(y_true, y_prob, threshold=THRESHOLD) -> dict:
     }
 
 
-# ─────────────────────────────────────────────────────────────
-# GRADIENT BOOSTING
-# ─────────────────────────────────────────────────────────────
+
+# Gradient boosting
 def build_gb() -> GradientBoostingClassifier:
     """
     sklearn GradientBoosting — no external dependencies needed.
@@ -86,9 +83,7 @@ def build_gb() -> GradientBoostingClassifier:
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# FOCAL LOSS
-# ─────────────────────────────────────────────────────────────
+# Focal loss
 def focal_loss(gamma: float = 2.0, alpha: float = 0.25):
     """
     Focal loss down-weights easy examples (confident interictal
@@ -106,9 +101,8 @@ def focal_loss(gamma: float = 2.0, alpha: float = 0.25):
     return loss
 
 
-# ─────────────────────────────────────────────────────────────
-# DENSE NEURAL NETWORK
-# ─────────────────────────────────────────────────────────────
+
+# Dense neural network
 def build_nn(n_features: int) -> keras.Model:
     inputs = keras.Input(shape=(n_features,), name="features")
 
@@ -133,9 +127,7 @@ def build_nn(n_features: int) -> keras.Model:
     return keras.Model(inputs=inputs, outputs=output)
 
 
-# ─────────────────────────────────────────────────────────────
-# LOAD DATA
-# ─────────────────────────────────────────────────────────────
+# Load data
 print("\n" + "=" * 62)
 print("  LOADING FEATURES v3")
 print("=" * 62)
@@ -160,9 +152,8 @@ print(f"  Preictal   : {int((y_all==1).sum()):,}")
 print(f"  Interictal : {int((y_all==0).sum()):,}")
 
 
-# ─────────────────────────────────────────────────────────────
-# LOPO TRAINING LOOP
-# ─────────────────────────────────────────────────────────────
+
+# LOPO training
 print("\n" + "=" * 62)
 print("  LEAVE ONE PATIENT OUT — v3")
 print("=" * 62)
@@ -194,12 +185,12 @@ for fold_idx, test_patient in enumerate(patient_ids):
           f"(pre: {int((y_test==1).sum()):,} | "
           f"inter: {int((y_test==0).sum()):,})")
 
-    # Scale features — fit on train only
+    # Scale features fit on train only
     scaler         = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled  = scaler.transform(X_test)
 
-    # ── GradientBoosting ──────────────────────────────────
+    # GradientBoosting 
     print(f"\n  [GradientBoosting] training...")
     gb_model      = build_gb()
     sample_weight = np.where(y_train == 1, spw, 1.0)
@@ -224,7 +215,7 @@ for fold_idx, test_patient in enumerate(patient_ids):
         str(MODELS_DIR / f"gb_{test_patient}.pkl")
     )
 
-    # ── Neural network with focal loss ────────────────────
+    # Neural network with focal loss
     print(f"\n  [Neural net] training...")
 
     nn_model = build_nn(n_features)
@@ -272,9 +263,8 @@ for fold_idx, test_patient in enumerate(patient_ids):
     nn_model.save(str(MODELS_DIR / f"nn_{test_patient}.keras"))
 
 
-# ─────────────────────────────────────────────────────────────
-# SUMMARY
-# ─────────────────────────────────────────────────────────────
+
+# Summary
 def summarize(results: dict, model_name: str):
     if not results:
         return
