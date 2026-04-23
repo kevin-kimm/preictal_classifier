@@ -35,7 +35,7 @@ FEATURES_DIR  = Path("data/features")
 FEATURES_DIR.mkdir(parents=True, exist_ok=True)
 
 SFREQ      = 250
-N_CHANNELS = 7   # headband-friendly montage: T3, T5, O1, Pz, O2, T6, T4
+N_CHANNELS = 7   # headband friendly: T3, T5, O1, Pz, O2, T6, T4
 BANDS = {
     "delta": (0.5,  4.0),
     "theta": (4.0,  8.0),
@@ -49,7 +49,7 @@ CHANNEL_PAIRS = list(combinations(range(N_CHANNELS), 2))
 N_PAIRS       = len(CHANNEL_PAIRS)   # 28
 
 
-# ── Band powers + ratios + spectral entropy (64) ──────────────────────────────
+# Band powers + ratios + spectral entropy (64) 
 
 def extract_band_features(window: np.ndarray) -> np.ndarray:
     freqs, psd = signal.welch(window, fs=SFREQ, nperseg=512, axis=-1)
@@ -77,7 +77,7 @@ def extract_band_features(window: np.ndarray) -> np.ndarray:
     ]).astype(np.float32)        # total: 64
 
 
-# ── Hjorth parameters (16) ────────────────────────────────────────────────────
+# Hjorth parameters (16) 
 
 def extract_hjorth(window: np.ndarray) -> np.ndarray:
     """
@@ -99,7 +99,7 @@ def extract_hjorth(window: np.ndarray) -> np.ndarray:
     return np.concatenate([mobility, complexity]).astype(np.float32)  # 16
 
 
-# ── Magnitude-squared coherence (140) ────────────────────────────────────────
+# Magnitude squared coherence (140)
 
 def extract_coherence(window: np.ndarray) -> np.ndarray:
     coh_features = np.zeros((N_PAIRS, N_BANDS), dtype=np.float32)
@@ -113,7 +113,7 @@ def extract_coherence(window: np.ndarray) -> np.ndarray:
     return coh_features.flatten()   # 140
 
 
-# ── Phase-Locking Value (140) ─────────────────────────────────────────────────
+# Phase locking value (140)
 
 def extract_plv(window: np.ndarray) -> np.ndarray:
     """
@@ -134,7 +134,7 @@ def extract_plv(window: np.ndarray) -> np.ndarray:
     return plv_features.flatten()   # 140
 
 
-# ── Permutation entropy (7) ───────────────────────────────────────────────────
+# Permutation entropy (7) 
 
 def permutation_entropy_channel(x: np.ndarray, order: int = 3,
                                  delay: int = 1) -> float:
@@ -159,7 +159,7 @@ def extract_permutation_entropy(window: np.ndarray) -> np.ndarray:
     ], dtype=np.float32)
 
 
-# ── All features combined ─────────────────────────────────────────────────────
+# All features combined 
 
 def extract_all_features(window: np.ndarray) -> np.ndarray:
     """
@@ -180,7 +180,7 @@ def extract_all_features(window: np.ndarray) -> np.ndarray:
     ]).astype(np.float32)
 
 
-# ── Patient-relative normalization ────────────────────────────────────────────
+# Patient relative normalization 
 
 def normalize_to_baseline(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     interictal_mask = y == 0
@@ -197,7 +197,7 @@ def normalize_to_baseline(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     return ((X - baseline_mean) / baseline_std).astype(np.float32)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main 
 
 N_BP  = N_CHANNELS * N_BANDS + N_CHANNELS * 2 + N_CHANNELS   # 64
 N_HJ  = N_CHANNELS * 2                                        # 16

@@ -4,18 +4,18 @@
   05_train_model.py
 
   Changes vs v2:
-    + XGBoost replaces GradientBoosting (scale_pos_weight,
-      histogram method, faster + better AUC)
+    + GradientBoosting with sample weights (no XGBoost needed)
     + Focal loss replaces binary_crossentropy for NN
       (down-weights easy interictal negatives)
+    + Larger NN (256→128→64→32→1)
 
   Loads:   data/features/features_v3.npz
   Method:  Leave One Patient Out (LOPO) cross-validation
-  Models:  1) XGBoost
+  Models:  1) GradientBoosting
            2) Dense neural network with focal loss
 
   Output:  models_v3/lopo_results.json
-           models_v3/xgb_<patient>.pkl
+           models_v3/gb_<patient>.pkl
            models_v3/nn_<patient>.keras
 =============================================================
 """
@@ -25,7 +25,7 @@ import joblib
 import numpy as np
 from pathlib import Path
 
-import xgboost as xgb
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     f1_score, roc_auc_score,
@@ -49,8 +49,9 @@ BATCH_SIZE = 64
 EPOCHS     = 50
 
 
-# ── Metrics ───────────────────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────
+# METRICS
+# ─────────────────────────────────────────────────────────────
 def evaluate(y_true, y_prob, threshold=THRESHOLD) -> dict:
     y_pred = (y_prob >= threshold).astype(int)
     cm     = confusion_matrix(y_true, y_pred)
@@ -67,34 +68,32 @@ def evaluate(y_true, y_prob, threshold=THRESHOLD) -> dict:
     }
 
 
-# ── XGBoost ───────────────────────────────────────────────────────────────────
-
-def build_xgb(spw: float) -> xgb.XGBClassifier:
+# ─────────────────────────────────────────────────────────────
+# GRADIENT BOOSTING
+# ─────────────────────────────────────────────────────────────
+def build_gb() -> GradientBoostingClassifier:
     """
-    scale_pos_weight=spw tells XGBoost the imbalance ratio directly —
-    cleaner than sample_weight and often yields better calibration.
-    tree_method='hist' uses histogram-based splits: faster on large datasets.
+    sklearn GradientBoosting — no external dependencies needed.
+    Imbalance handled via sample_weight during fit().
     """
-    return xgb.XGBClassifier(
+    return GradientBoostingClassifier(
         n_estimators=500,
         max_depth=6,
         learning_rate=0.05,
         subsample=0.8,
-        colsample_bytree=0.8,
-        scale_pos_weight=spw,
-        tree_method="hist",
         random_state=42,
-        eval_metric="auc",
-        verbosity=0,
+        verbose=0,
     )
 
 
-# ── Focal loss ────────────────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────
+# FOCAL LOSS
+# ─────────────────────────────────────────────────────────────
 def focal_loss(gamma: float = 2.0, alpha: float = 0.25):
     """
-    Focal loss down-weights easy examples (confident interictal windows)
-    so training focuses on hard cases near the decision boundary.
+    Focal loss down-weights easy examples (confident interictal
+    windows) so training focuses on hard cases near the decision
+    boundary.
 
     gamma: focusing parameter (higher = more focus on hard examples)
     alpha: class balance weight for the positive class
@@ -107,8 +106,9 @@ def focal_loss(gamma: float = 2.0, alpha: float = 0.25):
     return loss
 
 
-# ── Dense neural network ──────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────
+# DENSE NEURAL NETWORK
+# ─────────────────────────────────────────────────────────────
 def build_nn(n_features: int) -> keras.Model:
     inputs = keras.Input(shape=(n_features,), name="features")
 
@@ -133,8 +133,9 @@ def build_nn(n_features: int) -> keras.Model:
     return keras.Model(inputs=inputs, outputs=output)
 
 
-# ── Load data ─────────────────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────
+# LOAD DATA
+# ─────────────────────────────────────────────────────────────
 print("\n" + "=" * 62)
 print("  LOADING FEATURES v3")
 print("=" * 62)
@@ -159,14 +160,15 @@ print(f"  Preictal   : {int((y_all==1).sum()):,}")
 print(f"  Interictal : {int((y_all==0).sum()):,}")
 
 
-# ── LOPO training loop ────────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────
+# LOPO TRAINING LOOP
+# ─────────────────────────────────────────────────────────────
 print("\n" + "=" * 62)
 print("  LEAVE ONE PATIENT OUT — v3")
 print("=" * 62)
 
-xgb_results = {}
-nn_results  = {}
+gb_results = {}
+nn_results = {}
 
 for fold_idx, test_patient in enumerate(patient_ids):
     print(f"\n── Fold {fold_idx+1}/{len(patient_ids)} "
@@ -192,34 +194,37 @@ for fold_idx, test_patient in enumerate(patient_ids):
           f"(pre: {int((y_test==1).sum()):,} | "
           f"inter: {int((y_test==0).sum()):,})")
 
+    # Scale features — fit on train only
     scaler         = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled  = scaler.transform(X_test)
 
-    # ── XGBoost ──────────────────────────────────────────────────────────────
-    print(f"\n  [XGBoost] training...")
-    xgb_model = build_xgb(spw)
-    xgb_model.fit(X_train_scaled, y_train)
+    # ── GradientBoosting ──────────────────────────────────
+    print(f"\n  [GradientBoosting] training...")
+    gb_model      = build_gb()
+    sample_weight = np.where(y_train == 1, spw, 1.0)
+    gb_model.fit(X_train_scaled, y_train,
+                 sample_weight=sample_weight)
 
-    xgb_prob    = xgb_model.predict_proba(X_test_scaled)[:, 1]
-    xgb_metrics = evaluate(y_test, xgb_prob)
-    xgb_results[test_patient] = xgb_metrics
+    gb_prob    = gb_model.predict_proba(X_test_scaled)[:, 1]
+    gb_metrics = evaluate(y_test, gb_prob)
+    gb_results[test_patient] = gb_metrics
 
-    print(f"  [XGBoost]    AUC: {xgb_metrics['auc_roc']:.3f}  "
-          f"F1: {xgb_metrics['f1']:.3f}  "
-          f"Precision: {xgb_metrics['precision']:.3f}  "
-          f"Recall: {xgb_metrics['recall']:.3f}")
-    print(f"               TP: {xgb_metrics['tp']}  "
-          f"FP: {xgb_metrics['fp']}  "
-          f"FN: {xgb_metrics['fn']}  "
-          f"TN: {xgb_metrics['tn']}")
+    print(f"  [GradientBoosting] AUC: {gb_metrics['auc_roc']:.3f}  "
+          f"F1: {gb_metrics['f1']:.3f}  "
+          f"Precision: {gb_metrics['precision']:.3f}  "
+          f"Recall: {gb_metrics['recall']:.3f}")
+    print(f"                     TP: {gb_metrics['tp']}  "
+          f"FP: {gb_metrics['fp']}  "
+          f"FN: {gb_metrics['fn']}  "
+          f"TN: {gb_metrics['tn']}")
 
     joblib.dump(
-        {"model": xgb_model, "scaler": scaler},
-        str(MODELS_DIR / f"xgb_{test_patient}.pkl")
+        {"model": gb_model, "scaler": scaler},
+        str(MODELS_DIR / f"gb_{test_patient}.pkl")
     )
 
-    # ── Neural network with focal loss ────────────────────────────────────────
+    # ── Neural network with focal loss ────────────────────
     print(f"\n  [Neural net] training...")
 
     nn_model = build_nn(n_features)
@@ -267,8 +272,9 @@ for fold_idx, test_patient in enumerate(patient_ids):
     nn_model.save(str(MODELS_DIR / f"nn_{test_patient}.keras"))
 
 
-# ── Summary ───────────────────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────
+# SUMMARY
+# ─────────────────────────────────────────────────────────────
 def summarize(results: dict, model_name: str):
     if not results:
         return
@@ -307,31 +313,30 @@ def summarize(results: dict, model_name: str):
     print(f"{'=' * 62}")
 
 
-summarize(xgb_results, "XGBOOST")
-summarize(nn_results,  "NEURAL NETWORK (focal loss)")
+summarize(gb_results, "GRADIENT BOOSTING")
+summarize(nn_results, "NEURAL NETWORK (focal loss)")
 
-# ── Head-to-head ──────────────────────────────────────────────────────────────
-
-common = sorted(set(xgb_results) & set(nn_results))
+# ── Head-to-head ──────────────────────────────────────────
+common = sorted(set(gb_results) & set(nn_results))
 if common:
     print(f"\n{'=' * 62}")
-    print(f"  Head-to-head: XGBoost vs Neural Network")
+    print(f"  Head-to-head: GradientBoosting vs Neural Network")
     print(f"{'=' * 62}")
-    print(f"  {'Patient':<10} {'XGB AUC':>9} {'NN AUC':>9} {'Winner':>12}")
+    print(f"  {'Patient':<10} {'GB AUC':>9} {'NN AUC':>9} {'Winner':>12}")
     print("  " + "-" * 44)
-    xgb_wins = nn_wins = 0
+    gb_wins = nn_wins = 0
     for pat in common:
-        xa = xgb_results[pat]["auc_roc"]
+        ga = gb_results[pat]["auc_roc"]
         na = nn_results[pat]["auc_roc"]
-        winner = "XGBoost" if xa > na else "Neural net"
-        if xa > na: xgb_wins += 1
+        winner = "GradBoost" if ga > na else "Neural net"
+        if ga > na: gb_wins += 1
         else: nn_wins += 1
-        print(f"  {pat:<10} {xa:>9.3f} {na:>9.3f} {winner:>12}")
+        print(f"  {pat:<10} {ga:>9.3f} {na:>9.3f} {winner:>12}")
     print("  " + "-" * 44)
-    print(f"  XGBoost wins: {xgb_wins}  |  Neural net wins: {nn_wins}")
+    print(f"  GradBoost wins: {gb_wins}  |  Neural net wins: {nn_wins}")
     print(f"{'=' * 62}")
 
-all_results = {"xgboost": xgb_results, "neural_net": nn_results}
+all_results = {"gradient_boosting": gb_results, "neural_net": nn_results}
 with open(MODELS_DIR / "lopo_results.json", "w") as f:
     json.dump(all_results, f, indent=2)
 print(f"\n  Results saved → {MODELS_DIR}/lopo_results.json\n")
