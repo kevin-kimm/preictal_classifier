@@ -15,10 +15,15 @@
 =============================================================
 """
 
+import os
 import json
 import joblib
 import numpy as np
 from pathlib import Path
+
+# Enable Metal GPU acceleration on Apple Silicon M-series chips
+# No effect on non-Apple hardware — safe to leave in
+os.environ["TF_METAL_ENABLED"] = "1"
 
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import (
@@ -45,7 +50,7 @@ CM_DIR = MODELS_DIR / "confusion_matrices"
 CM_DIR.mkdir(parents=True, exist_ok=True)
 
 THRESHOLD  = 0.65
-BATCH_SIZE = 64
+BATCH_SIZE = 256    # optimized for M4 unified memory
 EPOCHS     = 50
 
 
@@ -80,7 +85,8 @@ def save_cm(m: dict, patient: str, model: str, split: str):
     for i in range(2):
         for j in range(2):
             ax.text(j, i, str(cm[i, j]), ha="center", va="center",
-                    color="white" if cm[i, j] > thresh else "black", fontsize=13)
+                    color="white" if cm[i, j] > thresh else "black",
+                    fontsize=13)
     plt.colorbar(im, ax=ax)
     plt.tight_layout()
     plt.savefig(CM_DIR / f"{split}_{patient}_{model}.png", dpi=100)
@@ -98,6 +104,10 @@ def print_split_metrics(train_m: dict, val_m: dict, label: str):
 
 
 def build_gb() -> GradientBoostingClassifier:
+    """
+    sklearn GradientBoosting — CPU only, does not use Metal GPU.
+    Imbalance handled via compute_sample_weight('balanced').
+    """
     return GradientBoostingClassifier(
         n_estimators=500,
         max_depth=4,
@@ -123,6 +133,10 @@ def focal_loss(gamma: float = 2.0, alpha: float = 0.75):
 
 
 def build_nn(n_features: int) -> keras.Model:
+    """
+    Uses Metal GPU on Apple Silicon for faster training.
+    Batch size 256 optimized for M4 unified memory.
+    """
     inputs = keras.Input(shape=(n_features,))
     x = layers.Dense(256, activation="relu")(inputs)
     x = layers.BatchNormalization()(x)
@@ -135,13 +149,16 @@ def build_nn(n_features: int) -> keras.Model:
     x = layers.Dropout(0.2)(x)
     x = layers.Dense(32, activation="relu")(x)
     x = layers.Dropout(0.2)(x)
-    output = layers.Dense(1, activation="sigmoid", name="preictal_prob")(x)
+    output = layers.Dense(1, activation="sigmoid",
+                          name="preictal_prob")(x)
     return keras.Model(inputs=inputs, outputs=output)
 
 
-# Load manifest
+# ─────────────────────────────────────────────────────────────
+# LOAD MANIFEST
+# ─────────────────────────────────────────────────────────────
 print("\n" + "=" * 62)
-print("  MODEL TRAINING  v3")
+print("  MODEL TRAINING  v3 (Metal GPU optimized)")
 print("=" * 62)
 
 manifest_path = SPLIT_DIR / "manifest.json"
@@ -158,15 +175,19 @@ n_features = manifest["n_features"]
 
 print(f"  Folds      : {len(folds)}")
 print(f"  Features   : {n_features}")
+print(f"  Batch size : {BATCH_SIZE} (M4 optimized)")
 print(f"  Models dir : {MODELS_DIR}/\n")
 
 
-# Training loop
+# ─────────────────────────────────────────────────────────────
+# TRAINING LOOP
+# ─────────────────────────────────────────────────────────────
 gb_metrics = {}
 nn_metrics = {}
 
 for fold_idx, patient in enumerate(folds):
-    print(f"\n── Fold {fold_idx+1}/{len(folds)} | Test patient: {patient} " + "─" * 20)
+    print(f"\n── Fold {fold_idx+1}/{len(folds)} "
+          f"| Test patient: {patient} " + "─" * 20)
 
     fold_path = SPLIT_DIR / f"fold_{patient}.npz"
     if not fold_path.exists():
@@ -174,15 +195,17 @@ for fold_idx, patient in enumerate(folds):
         continue
 
     fold = np.load(str(fold_path))
-    X_tr, y_tr     = fold["X_tr"],   fold["y_tr"]
-    X_val, y_val   = fold["X_val"],  fold["y_val"]
+    X_tr,  y_tr  = fold["X_tr"],  fold["y_tr"]
+    X_val, y_val = fold["X_val"], fold["y_val"]
 
     n_pre_tr  = int((y_tr  == 1).sum())
     n_pre_val = int((y_val == 1).sum())
-    print(f"  train: {len(y_tr):,}  (pre: {n_pre_tr:,} | inter: {int((y_tr==0).sum()):,})")
-    print(f"  val  : {len(y_val):,}  (pre: {n_pre_val:,} | inter: {int((y_val==0).sum()):,})")
+    print(f"  train: {len(y_tr):,}  "
+          f"(pre: {n_pre_tr:,} | inter: {int((y_tr==0).sum()):,})")
+    print(f"  val  : {len(y_val):,}  "
+          f"(pre: {n_pre_val:,} | inter: {int((y_val==0).sum()):,})")
 
-    # ── GradientBoosting ──────────────────────────────────────
+    # ── GradientBoosting ──────────────────────────────────
     print(f"\n  [GradientBoosting] training...")
     gb_model         = build_gb()
     sample_weight_tr = compute_sample_weight("balanced", y_tr)
@@ -197,9 +220,10 @@ for fold_idx, patient in enumerate(folds):
     gb_metrics[patient] = {"train": gb_tr_m, "val": gb_val_m}
     joblib.dump(gb_model, MODELS_DIR / f"gb_{patient}.pkl")
 
-    # ── Neural network ────────────────────────────────────────
-    print(f"\n  [Neural net] training...")
-    cw = compute_class_weight("balanced", classes=np.array([0, 1]), y=y_tr)
+    # ── Neural network with focal loss ────────────────────
+    print(f"\n  [Neural net] training (Metal GPU)...")
+    cw    = compute_class_weight("balanced",
+                                  classes=np.array([0, 1]), y=y_tr)
     nn_cw = {0: float(cw[0]), 1: float(cw[1])}
 
     nn_model = build_nn(n_features)
@@ -230,9 +254,11 @@ for fold_idx, patient in enumerate(folds):
         verbose=0,
     )
 
-    nn_tr_m  = evaluate(y_tr,  nn_model.predict(X_tr,  verbose=0).flatten())
-    nn_val_m = evaluate(y_val, nn_model.predict(X_val, verbose=0).flatten())
-    print_split_metrics(nn_tr_m, nn_val_m, "Neural net")
+    nn_tr_m  = evaluate(y_tr,
+                         nn_model.predict(X_tr,  verbose=0).flatten())
+    nn_val_m = evaluate(y_val,
+                         nn_model.predict(X_val, verbose=0).flatten())
+    print_split_metrics(nn_tr_m, nn_val_m, "Neural net (Metal GPU)")
     save_cm(nn_tr_m,  patient, "nn", "train")
     save_cm(nn_val_m, patient, "nn", "val")
 
@@ -240,13 +266,15 @@ for fold_idx, patient in enumerate(folds):
     nn_model.save(str(MODELS_DIR / f"nn_{patient}.keras"))
 
 
-# Save training metrics
+# ─────────────────────────────────────────────────────────────
+# SAVE + SUMMARIZE
+# ─────────────────────────────────────────────────────────────
 train_metrics_path = MODELS_DIR / "train_metrics.json"
 with open(train_metrics_path, "w") as f:
-    json.dump({"gradient_boosting": gb_metrics, "neural_net": nn_metrics}, f, indent=2)
+    json.dump({"gradient_boosting": gb_metrics,
+               "neural_net": nn_metrics}, f, indent=2)
 
 
-# Summary
 def summarize_split(metrics: dict, model_name: str, split: str):
     rows = {p: m[split] for p, m in metrics.items() if split in m}
     if not rows:
@@ -259,8 +287,8 @@ def summarize_split(metrics: dict, model_name: str, split: str):
     print(f"\n{'=' * 70}")
     print(f"  {model_name} — {split.upper()} SUMMARY")
     print(f"{'=' * 70}")
-    print(f"  {'Patient':<10} {'AUC-ROC':>8} {'AUC-PR':>8} {'Recall':>8} "
-          f"{'F1':>7}  {'Loss':>8}")
+    print(f"  {'Patient':<10} {'AUC-ROC':>8} {'AUC-PR':>8} "
+          f"{'Recall':>8} {'F1':>7}  {'Loss':>8}")
     print("  " + "-" * 56)
     for pat, r in sorted(rows.items()):
         print(f"  {pat:<10} {r['auc_roc']:>8.3f} {r['auc_pr']:>8.3f} "
@@ -279,4 +307,5 @@ summarize_split(nn_metrics, "NEURAL NETWORK",    "train")
 summarize_split(nn_metrics, "NEURAL NETWORK",    "val")
 
 print(f"\n  Train metrics saved → {train_metrics_path}")
-print(f"  Models saved       → {MODELS_DIR}/\n")
+print(f"  Confusion matrices  → {CM_DIR}/")
+print(f"  Models saved        → {MODELS_DIR}/\n")
